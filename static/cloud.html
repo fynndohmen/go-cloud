@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>My Cloud</title>
+    <link rel="stylesheet" href="/static/cloud.css">
+</head>
+<body>
+    <header class="header">
+        <div class="path">
+            Path:
+            <span id="breadcrumbs" class="breadcrumbs"></span>
+        </div>
+
+        <div class="actions">
+            <!-- Empty Trash (only visible in /trash) -->
+            <button id="btn-empty-trash" class="btn-danger hidden">Empty Trash</button>
+
+            <!-- + New with dropdown -->
+            <div class="new-wrapper">
+                <button id="btn-new" class="btn-primary">+ New</button>
+                <div id="new-menu" class="new-menu hidden">
+                    <button class="menu-item" id="menu-new-folder">New Folder</button>
+                    <button class="menu-item" id="menu-upload-file">Upload File</button>
+                    <button class="menu-item" id="menu-upload-folder">Upload Folder</button>
+                </div>
+            </div>
+
+            <!-- Logout -->
+            <button id="btn-logout" class="btn-secondary">Logout</button>
+
+            <!-- Hidden inputs for uploads -->
+            <input type="file" id="file-input" multiple style="display: none;">
+            <input type="file" id="folder-input" webkitdirectory directory style="display: none;">
+        </div>
+    </header>
+
+    <div class="content">
+        <!-- LEFT SIDEBAR -->
+        <aside class="sidebar">
+            <div id="folder-tree" class="folder-tree"></div>
+
+            <div class="sidebar-sep"></div>
+
+            <!-- Trash entry (URL-only was earlier; now listed here for navigation) -->
+            <button id="trash-link" class="sidebar-special" type="button">Trash</button>
+        </aside>
+
+        <!-- MAIN GRID -->
+        <main class="main">
+            <div id="file-list" class="file-grid"></div>
+        </main>
+    </div>
+
+    <!-- Image preview overlay -->
+    <div id="preview-overlay" class="preview-overlay hidden">
+        <div class="preview-backdrop" id="preview-backdrop"></div>
+        <div class="preview-dialog">
+            <button id="preview-close" class="preview-close" aria-label="Close preview">&times;</button>
+            <img id="preview-image" alt="Preview" class="preview-image">
+            <div id="preview-caption" class="preview-caption"></div>
+        </div>
+    </div>
+
+    <!-- Folder Picker overlay (used for Move + Restore) -->
+    <div id="folder-picker-overlay" class="picker-overlay hidden">
+        <div class="picker-backdrop" id="picker-backdrop"></div>
+        <div class="picker-dialog" role="dialog" aria-modal="true">
+            <div class="picker-header">
+                <div id="picker-title" class="picker-title">Select folder</div>
+                <button id="picker-close" class="picker-close" type="button" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="picker-body">
+                <div class="picker-path">
+                    Selected:
+                    <span id="picker-selected" class="picker-selected">/</span>
+                </div>
+                <div id="picker-tree" class="picker-tree"></div>
+            </div>
+
+            <div class="picker-footer">
+                <button id="picker-cancel" class="btn-secondary" type="button">Cancel</button>
+                <button id="picker-confirm" class="btn-primary" type="button">Select</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context menu for file / folder cards -->
+    <div id="file-context-menu" class="context-menu hidden">
+        <!-- normal view -->
+        <button class="context-menu-item" data-action="download">Download</button>
+        <button class="context-menu-item" data-action="rename">Rename</button>
+        <button class="context-menu-item" data-action="move">Move</button>
+        <button class="context-menu-item" data-action="trash">Move to Trash</button>
+
+        <!-- trash view -->
+        <button class="context-menu-item hidden" data-action="restore">Restore</button>
+        <button class="context-menu-item hidden" data-action="delete-forever">Delete forever</button>
+    </div>
+
+    <script src="/static/cloud.js"></script>
+</body>
+</html>
