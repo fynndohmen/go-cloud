@@ -14,6 +14,7 @@ import (
     "strings"
     "time"
     "fmt"
+    "sort"
 
 
 	"golang.org/x/crypto/bcrypt"	
@@ -124,7 +125,7 @@ func uniqueNameInDir(dirFull, baseName string) (string, error) {
 func main() {
 	var err error
 
-	dsn := "postgres://fynn:*****@localhost:5432/cloudlab?sslmode=disable"
+	dsn := "postgres://fynn:ddbbppaassss@localhost:5432/cloudlab?sslmode=disable"
 
 	db, err = sql.Open("pgx", dsn)
 	if err != nil {
@@ -345,7 +346,13 @@ func apiFilesHandler(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    files := make([]FileEntry, 0, len(entries))
+    type entryMeta struct {
+        fe    FileEntry
+        mtime time.Time
+        isDir bool
+    }
+
+    items := make([]entryMeta, 0, len(entries))
 
     for _, entry := range entries {
         if relPath == "." && entry.IsDir() && entry.Name() == "trash" {
@@ -371,15 +378,81 @@ func apiFilesHandler(w http.ResponseWriter, r *http.Request) {
         } else {
             p = filepath.ToSlash(filepath.Join(relPath, name))
         }
-
         p = strings.TrimPrefix(p, "/")
 
-        files = append(files, FileEntry{
-            Name: name,
-            Path: "/" + p,
-            Type: entryType,
-            Size: info.Size(),
+        items = append(items, entryMeta{
+            fe: FileEntry{
+                Name: name,
+                Path: "/" + p,
+                Type: entryType,
+                Size: info.Size(),
+            },
+            mtime: info.ModTime(),
+            isDir: entry.IsDir(),
         })
+    }
+
+    sortKey := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort")))
+    if sortKey == "" {
+        sortKey = "name"
+    }
+
+    if sortKey != "name" && sortKey != "date" && sortKey != "time" && sortKey != "mtime" {
+        sortKey = "name"
+    }
+
+    dir := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("dir")))
+    desc := dir == "desc"
+
+    cmpTime := func(a, b time.Time) int {
+        if a.Before(b) {
+            return -1
+        }
+        if a.After(b) {
+            return 1
+        }
+        return 0
+    }
+
+    sort.SliceStable(items, func(i, j int) bool {
+        a := items[i]
+        b := items[j]
+
+        if a.isDir != b.isDir {
+            return a.isDir
+        }
+
+        cmp := 0
+        switch sortKey {
+        case "date", "time", "mtime":
+            cmp = cmpTime(a.mtime, b.mtime)
+        default:
+            an := strings.ToLower(a.fe.Name)
+            bn := strings.ToLower(b.fe.Name)
+            cmp = strings.Compare(an, bn)
+        }
+
+        if cmp == 0 {
+            an2 := strings.ToLower(a.fe.Name)
+            bn2 := strings.ToLower(b.fe.Name)
+            cmp = strings.Compare(an2, bn2)
+            if cmp == 0 {
+                cmp = strings.Compare(a.fe.Name, b.fe.Name)
+            }
+        }
+
+        if cmp == 0 {
+            return false
+        }
+        if desc {
+            return cmp > 0
+        }
+        return cmp < 0
+    })
+
+    files := make([]FileEntry, 0, len(items))
+    for _, it := range items {
+        files = append(files, it.fe)
     }
 
     w.Header().Set("Content-Type", "application/json")

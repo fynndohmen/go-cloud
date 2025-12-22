@@ -1,4 +1,9 @@
 let currentPath = "/";
+
+// Server-side sorting state
+let currentSortKey = "name"; // "name" | "date"
+let currentSortDir = "asc";  // "asc" | "desc"
+
 let currentContextEntry = null;
 
 // Explorer state (sidebar)
@@ -53,27 +58,137 @@ function normalizePath(p) {
     return x;
 }
 
+function normalizeSortKey(k) {
+    const x = (k || "").toLowerCase().trim();
+    if (x === "date" || x === "time" || x === "mtime") return "date";
+    return "name";
+}
+
+function normalizeSortDir(d) {
+    const x = (d || "").toLowerCase().trim();
+    return x === "desc" ? "desc" : "asc";
+}
+
 function shouldHideFromExplorer(dirName) {
     // trash stays hidden from normal folder listings (destinations should not be /trash)
     return dirName === "trash";
 }
 
-function getPathFromLocation() {
+function getStateFromLocation() {
     const params = new URLSearchParams(window.location.search);
     const p = params.get("path");
-    if (!p || p === "") return "/";
-    return p.startsWith("/") ? p : "/" + p;
+    const sort = params.get("sort");
+    const dir = params.get("dir");
+
+    const path = (!p || p === "") ? "/" : (p.startsWith("/") ? p : "/" + p);
+
+    return {
+        path: normalizePath(path),
+        sort: normalizeSortKey(sort),
+        dir: normalizeSortDir(dir),
+    };
 }
 
-function updateUrlForPath(path) {
-    const url = window.location.pathname + "?path=" + encodeURIComponent(path);
-    history.pushState({ path }, "", url);
+function updateUrlForState(path, sortKey, sortDir, push = true) {
+    const p = normalizePath(path);
+    const s = normalizeSortKey(sortKey);
+    const d = normalizeSortDir(sortDir);
+
+    const url =
+        window.location.pathname +
+        "?path=" + encodeURIComponent(p) +
+        "&sort=" + encodeURIComponent(s) +
+        "&dir=" + encodeURIComponent(d);
+
+    const state = { path: p, sort: s, dir: d };
+
+    if (push) history.pushState(state, "", url);
+    else history.replaceState(state, "", url);
 }
 
 function joinPath(base, name) {
     base = normalizePath(base);
     if (base === "/" || base === "") return "/" + name;
     return base.replace(/\/+$/, "") + "/" + name;
+}
+
+// ===== Sort Controls (Header) =====
+
+function ensureSortControls() {
+    // Inject controls into header actions without touching HTML.
+    const actions = document.querySelector(".actions");
+    if (!actions) return;
+
+    if (document.getElementById("sort-select")) return; // already exists
+
+    const wrapper = document.createElement("div");
+    wrapper.id = "sort-wrapper";
+    wrapper.style.display = "flex";
+    wrapper.style.alignItems = "center";
+    wrapper.style.gap = "0.5rem";
+
+    const select = document.createElement("select");
+    select.id = "sort-select";
+    // minimal styling (keeps light theme consistent, without editing CSS)
+    select.style.padding = "0.45rem 0.6rem";
+    select.style.borderRadius = "0.5rem";
+    select.style.border = "1px solid #e2e8f0";
+    select.style.background = "#ffffff";
+    select.style.color = "#0f172a";
+    select.style.fontWeight = "600";
+    select.style.fontSize = "0.9rem";
+    select.style.cursor = "pointer";
+
+    const optName = document.createElement("option");
+    optName.value = "name";
+    optName.textContent = "Name";
+
+    const optDate = document.createElement("option");
+    optDate.value = "date";
+    optDate.textContent = "Date";
+
+    select.appendChild(optName);
+    select.appendChild(optDate);
+
+    const dirBtn = document.createElement("button");
+    dirBtn.id = "sort-dir-btn";
+    dirBtn.type = "button";
+    dirBtn.className = "btn-secondary";
+    dirBtn.style.padding = "0.45rem 0.7rem";
+    dirBtn.title = "Toggle sort direction";
+
+    function renderDirBtn() {
+        // simple arrows
+        dirBtn.textContent = currentSortDir === "desc" ? "↓" : "↑";
+    }
+
+    // init values
+    select.value = currentSortKey;
+    renderDirBtn();
+
+    select.addEventListener("change", async () => {
+        currentSortKey = normalizeSortKey(select.value);
+        updateUrlForState(currentPath, currentSortKey, currentSortDir, true);
+        await loadFiles(currentPath);
+    });
+
+    dirBtn.addEventListener("click", async () => {
+        currentSortDir = currentSortDir === "desc" ? "asc" : "desc";
+        renderDirBtn();
+        updateUrlForState(currentPath, currentSortKey, currentSortDir, true);
+        await loadFiles(currentPath);
+    });
+
+    wrapper.appendChild(select);
+    wrapper.appendChild(dirBtn);
+
+    // Insert before "+ New" if possible
+    const newWrapper = actions.querySelector(".new-wrapper");
+    if (newWrapper && newWrapper.parentNode === actions) {
+        actions.insertBefore(wrapper, newWrapper);
+    } else {
+        actions.appendChild(wrapper);
+    }
 }
 
 // ===== Breadcrumbs =====
@@ -94,7 +209,7 @@ function renderBreadcrumbs(path) {
     rootBtn.textContent = "/";
     rootBtn.addEventListener("click", async () => {
         const target = "/";
-        updateUrlForPath(target);
+        updateUrlForState(target, currentSortKey, currentSortDir, true);
         await loadFiles(target);
     });
     el.appendChild(rootBtn);
@@ -113,7 +228,7 @@ function renderBreadcrumbs(path) {
         btn.className = "breadcrumb";
         btn.textContent = part;
         btn.addEventListener("click", async () => {
-            updateUrlForPath(target);
+            updateUrlForState(target, currentSortKey, currentSortDir, true);
             await loadFiles(target);
         });
 
@@ -124,6 +239,7 @@ function renderBreadcrumbs(path) {
 // ===== API helpers =====
 
 async function fetchDirs(path) {
+    // for explorer/picker we don’t apply sorting parameters (not needed)
     const res = await fetch("/api/files?path=" + encodeURIComponent(path));
 
     if (res.status === 401) {
@@ -220,11 +336,8 @@ function collapseTreeItem(item) {
 
 async function toggleTreeItem(item) {
     if (!item) return;
-    if (item.classList.contains("expanded")) {
-        collapseTreeItem(item);
-    } else {
-        await expandTreeItem(item);
-    }
+    if (item.classList.contains("expanded")) collapseTreeItem(item);
+    else await expandTreeItem(item);
 }
 
 /**
@@ -334,7 +447,7 @@ function createTreeItem(path, name) {
         e.preventDefault();
         e.stopPropagation();
         const p = item.getAttribute("data-path") || "/";
-        updateUrlForPath(p);
+        updateUrlForState(p, currentSortKey, currentSortDir, true);
         await loadFiles(p);
         closeContextMenu();
         closePreview();
@@ -387,7 +500,7 @@ async function initExplorer() {
     label.addEventListener("click", async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        updateUrlForPath("/");
+        updateUrlForState("/", currentSortKey, currentSortDir, true);
         await loadFiles("/");
         setActiveTreeRow("/");
     });
@@ -639,6 +752,13 @@ async function loadFiles(path) {
 
     renderBreadcrumbs(currentPath);
 
+    // Ensure header sort controls exist (and reflect state)
+    ensureSortControls();
+    const sel = document.getElementById("sort-select");
+    if (sel) sel.value = currentSortKey;
+    const dirBtn = document.getElementById("sort-dir-btn");
+    if (dirBtn) dirBtn.textContent = currentSortDir === "desc" ? "↓" : "↑";
+
     // Trash sidebar active highlight
     const trashLink = document.getElementById("trash-link");
     if (trashLink) trashLink.classList.toggle("active", isTrashView(currentPath));
@@ -649,7 +769,12 @@ async function loadFiles(path) {
     }
 
     try {
-        const res = await fetch("/api/files?path=" + encodeURIComponent(currentPath));
+        const url =
+            "/api/files?path=" + encodeURIComponent(currentPath) +
+            "&sort=" + encodeURIComponent(currentSortKey) +
+            "&dir=" + encodeURIComponent(currentSortDir);
+
+        const res = await fetch(url);
 
         if (res.status === 401) {
             window.location.href = "/login";
@@ -687,16 +812,9 @@ function renderFiles(files) {
         return;
     }
 
-    // folders first (then alphabetical)
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-    const sorted = [...files].sort((a, b) => {
-        const ad = a.type === "dir";
-        const bd = b.type === "dir";
-        if (ad !== bd) return ad ? -1 : 1;
-        return collator.compare(a.name || "", b.name || "");
-    });
-
-    sorted.forEach(file => {
+    // IMPORTANT: no client-side sorting here.
+    // Server already sorts (folders first + name/date + dir).
+    files.forEach(file => {
         const card = document.createElement("div");
         card.className = "file-card";
 
@@ -737,7 +855,7 @@ function renderFiles(files) {
         if (file.type === "dir") {
             card.addEventListener("dblclick", async () => {
                 const nextPath = joinPath(currentPath, file.name);
-                updateUrlForPath(nextPath);
+                updateUrlForState(nextPath, currentSortKey, currentSortDir, true);
                 await loadFiles(nextPath);
             });
         } else if (isImageFile(file.name)) {
@@ -995,6 +1113,14 @@ async function emptyTrash() {
 document.addEventListener("DOMContentLoaded", async () => {
     pickerInitDom();
 
+    // Read initial state from URL
+    const initial = getStateFromLocation();
+    currentPath = initial.path;
+    currentSortKey = initial.sort;
+    currentSortDir = initial.dir;
+
+    ensureSortControls();
+
     const newBtn = document.getElementById("btn-new");
     const newMenu = document.getElementById("new-menu");
     const logoutBtn = document.getElementById("btn-logout");
@@ -1034,7 +1160,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         newMenu.style.position = "fixed";
         newMenu.style.right = "auto";
 
-        // clamp with measured size if possible
         const rect = newMenu.getBoundingClientRect();
         const w = rect.width || 190;
         const h = rect.height || 170;
@@ -1057,7 +1182,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (trashLink) {
         trashLink.addEventListener("click", async () => {
-            updateUrlForPath("/trash");
+            updateUrlForState("/trash", currentSortKey, currentSortDir, true);
             await loadFiles("/trash");
             closeContextMenu();
             closePreview();
@@ -1077,21 +1202,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
     }
 
-    // ✅ Right-click anywhere in main area (including empty space below grid)
+    // Right-click anywhere in main area (including empty space below grid)
     const mainArea = document.querySelector("main.main");
     if (mainArea && newMenu) {
         mainArea.addEventListener(
             "contextmenu",
             (e) => {
-                // if on a card -> keep file context menu
+                // If on a card -> keep file context menu
                 if (e.target.closest(".file-card")) return;
 
-                // ignore when clicking menus/modal
+                // Ignore when clicking menus/modal
                 if (e.target.closest("#file-context-menu")) return;
                 if (e.target.closest("#new-menu")) return;
                 if (e.target.closest("#folder-picker-overlay")) return;
 
-                // ignore sidebar
+                // Ignore sidebar
                 if (e.target.closest(".sidebar")) return;
 
                 e.preventDefault();
@@ -1238,26 +1363,35 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     });
 
-    const initialPath = normalizePath(getPathFromLocation());
-    currentPath = initialPath;
-
-    history.replaceState(
-        { path: initialPath },
-        "",
-        window.location.pathname + "?path=" + encodeURIComponent(initialPath)
-    );
+    // Put initial state into history (so back/forward preserves sort)
+    updateUrlForState(currentPath, currentSortKey, currentSortDir, false);
 
     await initExplorer();
-    await loadFiles(initialPath);
+    await loadFiles(currentPath);
 });
 
 window.addEventListener("popstate", async (event) => {
-    let path = "/";
-    if (event.state && event.state.path) path = event.state.path;
-    else path = getPathFromLocation();
-    await loadFiles(path);
+    let st;
+    if (event.state && event.state.path) {
+        st = {
+            path: normalizePath(event.state.path),
+            sort: normalizeSortKey(event.state.sort),
+            dir: normalizeSortDir(event.state.dir),
+        };
+    } else {
+        st = getStateFromLocation();
+    }
+
+    currentSortKey = st.sort;
+    currentSortDir = st.dir;
+
+    await loadFiles(st.path);
 });
 
 window.addEventListener("pageshow", async () => {
-    await loadFiles(currentPath);
+    // Ensure state stays consistent if browser restores from bfcache
+    const st = getStateFromLocation();
+    currentSortKey = st.sort;
+    currentSortDir = st.dir;
+    await loadFiles(st.path);
 });
