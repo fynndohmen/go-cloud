@@ -125,7 +125,25 @@ func uniqueNameInDir(dirFull, baseName string) (string, error) {
 func main() {
 	var err error
 
-	dsn := "postgres://fynn:ddbbppaassss@localhost:5432/cloudlab?sslmode=disable"
+    credentialDirectory := os.Getenv("CREDENTIALS_DIRECTORY")
+
+    if credentialDirectory == "" {
+        log.Fatal("CREDENTIALS_DIRECTORY is not set")
+    }
+
+    credentialBytes, credentialErr := os.ReadFile(
+        filepath.Join(credentialDirectory, "database-url"),
+    )
+
+    if credentialErr != nil {
+        log.Fatal("Cannot read Cloudlab database credential")
+    }
+
+    dsn := strings.TrimSpace(string(credentialBytes))
+
+    if dsn == "" {
+        log.Fatal("Cloudlab database credential is empty")
+    }
 
 	db, err = sql.Open("pgx", dsn)
 	if err != nil {
